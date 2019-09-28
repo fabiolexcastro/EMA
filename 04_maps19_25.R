@@ -7,7 +7,7 @@ rm(list = ls())
 options(scipen = 999)
 
 # Load data ---------------------------------------------------------------
-pth <- '../tbl/0826_total_wide.xlsx'
+pth <- '../tbl/encuestas/0927_EMA_total.xlsx'
 tbl <- read_excel(pth)
 dte <- basename(pth) %>% 
   parse_number()
@@ -15,7 +15,7 @@ com <- shapefile('../shp/base/bcs_comunas_geo.shp')
 brr <- st_read('../shp/base/bcs_barrios_geo.shp') %>% 
   mutate(BARRIO = as.character(BARRIO))
 lim <- shapefile('../shp/base/lim_cali.shp')
-dst <- st_read('../shp/geocode/8-26_Destino.shp')
+# dst <- st_read('../shp/geocode/8-26_Destino.shp')
 pth.lfm <- 'D:/univalle/movilidad/data/shp/own/movilidad/lfm'
 
 # Mapa 19. Lineas de deseo ------------------------------------------------
@@ -71,6 +71,7 @@ map19 <- function(dfm){
     summarize_all(.funs = sum) %>% 
     ungroup() %>% 
     NAer()
+  duplicated(rsl$COMUNA) %>% unique()
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
   writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m19_lineasDeseo_', dte), driver = 'ESRI Shapefile')
@@ -143,7 +144,6 @@ map20 <- function(){
     ungroup() %>% 
     NAer() %>% 
     retype()
-  
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
   writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m20__causaDiscapacidad_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
@@ -164,7 +164,7 @@ map21 <- function(){
     dplyr::summarize(count = n()) %>% 
     ungroup() %>% 
     spread(c_1, count) %>% 
-    dplyr::select(COMUNA, Hombre, Mujer, Otro) %>% 
+    dplyr::select(COMUNA, Hombre, Mujer) %>% 
     NAer() %>% 
     retype()
   
@@ -194,9 +194,8 @@ map21 <- function(){
     retype()
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m21_sexo_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m21_sexo_', dte), driver = 'ESRI Shapefile', overwrite = TRUE)
   print('Done!')
-  
 }
 
 # Mapa 22. Rangos edad  ---------------------------------------------------
@@ -349,60 +348,21 @@ map24()
 # Mapa 25. Tiempo promedio total de desplazamiento ------------------------
 map25 <- function(){
   
-  dfm <- tbl
+  # dfm <- tbl
   
-  # Univalle
-  df1 <- dfm %>% 
-    dplyr::select(a_5, e_8_1:e_8_10, e_15_1:e_15_10, ) %>% 
-    NAer() %>% 
-    retype() %>% 
-    as_tibble()
-  df1[df1 == 0] <- NA
-  df2 <- dfm %>% 
-    dplyr::select(a_5, e_9_1:e_9_10, e_16_1:e_16_10) %>% 
-    NAer() %>% 
-    retype() %>% 
-    as_tibble()
-  df2[df2 == 0] <- NA
+  t1 <- st_read('../shp/maps/m23_tespera_927.shp') %>% 
+    as.data.frame %>% 
+    dplyr::select(-geometry)
+  t2 <- st_read('../shp/maps/m24_tviaje_927.shp') %>% 
+    as.data.frame %>% 
+    dplyr::select(-geometry)
+  tt <- inner_join(t1, t2, by = 'com') %>% 
+    mutate(t_total = t_espera + tviaje) %>% 
+    dplyr::select(-t_espera, -tviaje)
   
-  avg1 <- rowMeans(df1[,2:ncol(df1)], na.rm = TRUE)
-  avg2 <- rowMeans(df1[,2:ncol(df2)], na.rm = TRUE)
-  
-  dfm <- dfm %>% 
-    transmute(a_5,
-              t_espera = avg1,
-              t_trayecto = avg2,
-              t_total = t_espera + t_trayecto) %>% 
-    inner_join(., as.data.frame(brr)[,c('BARRIO', 'COMUNA')], by = c('a_5' = 'BARRIO')) %>% 
-    group_by(COMUNA) %>% 
-    dplyr::summarise(t_total = mean(t_total, na.rm = TRUE)) %>% 
-    ungroup() %>% 
-    mutate(COMUNA = as.numeric(as.character(COMUNA)))
-  
-  # LFM
-  lfm <- read_csv('D:/univalle/movilidad/tbl/join/tiempo_lfm.csv')
-  lfm <- lfm %>% 
-    dplyr::select(barrio_residencia, transporte_viaje, tiempototal) %>% 
-    inner_join(., as.data.frame(brr)[,c('BARRIO', 'COMUNA')], by = c('barrio_residencia' = 'BARRIO')) %>% 
-    group_by(COMUNA) %>% 
-    summarise(t_total = mean(tiempototal, na.rm = TRUE)) %>% 
-    ungroup() %>% 
-    mutate(COMUNA = as.numeric(as.character(COMUNA)))
-  
-  # Join
-  rsl <- bind_rows(dfm, lfm) %>% 
-    group_by(COMUNA) %>% 
-    summarise_all(.funs = mean) %>% 
-    ungroup() %>% 
-    mutate(COMUNA = as.numeric(as.character(COMUNA)))
-  rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))  
+  rsl <- inner_join(st_as_sf(com), tt, by = c('com' = 'com'))  
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m25_ttotal_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m25_ttotal_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
 }
 map25()
-
-
-
-
-
