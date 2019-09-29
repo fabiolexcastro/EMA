@@ -7,7 +7,7 @@ rm(list = ls())
 options(scipen = 999)
 
 # Load data ---------------------------------------------------------------
-pth <- '../tbl/0826_total_wide.xlsx'
+pth <- '../tbl/encuestas/0927_EMA_total.xlsx'
 tbl <- read_excel(pth)
 dte <- basename(pth) %>% 
   parse_number()
@@ -15,7 +15,7 @@ com <- shapefile('../shp/base/bcs_comunas_geo.shp')
 brr <- st_read('../shp/base/bcs_barrios_geo.shp') %>% 
   mutate(BARRIO = as.character(BARRIO))
 lim <- shapefile('../shp/base/lim_cali.shp')
-dst <- st_read('../shp/geocode/8-26_Destino.shp')
+# dst <- st_read('../shp/geocode/8-26_Destino.shp')
 pth.lfm <- 'D:/univalle/movilidad/data/shp/own/movilidad/lfm'
 
 # Categorias
@@ -26,14 +26,16 @@ ctg <- ctg %>%
 
 # Mapa 7. Barreras ida moto y bicicleta -----------------------------------
 map07 <- function(){
-  dfm <- tbl
+  
+  # Comunas ---------------------------------------------------------------
   
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5, f_19:f_33)
-  lbl <- data.frame(nameCol = paste0('f_', c(19:24, 26:33)),
+  lbl <- data.frame(nameCol = paste0('f_', c(19:24, 26:31, 33)),
                     barrera = c('m_abordar', 'm_ubicar', 'm_manejar', 'm_retr', 'm_leer', 'm_pr_pav', 'm_bajar',
-                                'b_abordar', 'b_ubicar', 'b_leer', 'b_movili', 'b_pr_pav', 'b_dcdrrecor', 'b_bajar'))
+                                'b_abordar', 'b_ubicar', 'b_leer', 'b_movili', 'b_pr_pav', 'b_bajar')) 
   nms <- as.character(lbl$barrera)
   dfm <- inner_join(dfm, as.data.frame(brr) %>% dplyr::select(BARRIO, COMUNA), by = c('a_5' = 'BARRIO'))
   dfm <- dfm %>% 
@@ -48,8 +50,6 @@ map07 <- function(){
     spread(dificultad, promedio) %>% 
     NAer() %>% 
     retype() 
-  
-  colnames(dfm)
   
   # LFM
   lfm_mto <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/07_barreras_ida_moto.shp')
@@ -82,16 +82,71 @@ map07 <- function(){
     group_by(COMUNA) %>% 
     summarize_all(.funs = sum) %>% 
     ungroup()
-  sh3 <- inner_join(sh1, sh2, by = c('COMUNA')) %>% 
+  sh3 <- full_join(sh1, sh2, by = 'COMUNA') %>% 
     rename(comuna = COMUNA) %>% 
-    mutate(comuna = as.numeric(as.character(comuna)))
+    mutate(comuna = as.numeric(as.character(comuna))) %>% 
+    retype() %>% 
+    NAer()
   
   # Join
   rsl <- bind_rows(dfm, sh3)
+  duplicated(rsl$comuna) %>% unique()
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'comuna'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m07_brr_ida_motobici_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m07_brr_ida_motobici_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
+
+  # Barrios --------------------------------------------------------------
+
+  # Univalle
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5, f_19:f_33)
+  lbl <- data.frame(nameCol = paste0('f_', c(19:24, 26:31, 33)),
+                    barrera = c('m_abordar', 'm_ubicar', 'm_manejar', 'm_retr', 'm_leer', 'm_pr_pav', 'm_bajar',
+                                'b_abordar', 'b_ubicar', 'b_leer', 'b_movili', 'b_pr_pav', 'b_bajar')) 
+  nms <- as.character(lbl$barrera)
+  dfm <- dfm %>% 
+    setNames(c('id_encuesta', 'barrio', nms)) %>% 
+    dplyr::select(-id_encuesta) %>% 
+    gather(dificultad, tipo, -barrio) %>% 
+    drop_na() %>%
+    inner_join(., ctg, by = 'tipo') %>% 
+    group_by(barrio, dificultad) %>% 
+    dplyr::summarize(promedio = mean(valor, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    spread(dificultad, promedio) %>% 
+    NAer() %>% 
+    retype() %>% 
+    rename(BARRIO = barrio)
+  
+  # LFM
+  lfm_mto <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/07_barreras_ida_moto.shp')
+  lfm_bcc <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/07_barreras_ida_bicicleta.shp')
+  sh1 <- lfm_mto %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B7) %>% 
+    setNames(c('BARRIO', 'm_abordar', 'm_ubicar', 'm_manejar', 'm_retr', 'm_leer', 'm_pr_pav', 'm_bajar', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry)
+  sh2 <- lfm_bcc %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B6) %>% 
+    setNames(c('BARRIO', 'b_abordar', 'b_ubicar', 'b_leer', 'b_movili', 'b_pr_pav', 'b_bajar', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry)
+  lfm <- inner_join(sh1, sh2, by = 'BARRIO')
+  
+  dfm <- bind_rows(lfm, dfm)
+  dfm <- dfm %>% mutate(BARRIO = as.character(BARRIO))
+  
+  duplicated(dfm$BARRIO) %>% unique()
+  
+  rsl <- inner_join(st_as_sf(brr), dfm, by = c('BARRIO' = 'BARRIO'))
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrios', layer = paste0('m07_brr_ida_motobici_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
+  print('Done!')
+  
 }
 map07()
 
@@ -181,9 +236,9 @@ map08()
 # Mapa 9. Barreras ida taxi -----------------------------------------------
 map09 <- function(){
   
-  dfm <- tbl
-  
+  # Comunas ---------------------------------------------------------------
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5, f_34:f_41)
   lbl <- data.frame(nameCol = paste0('f_', c(34:36, 38:41)),
@@ -223,10 +278,51 @@ map09 <- function(){
   
   # Join
   rsl <- bind_rows(dfm, lfm)
-  rsl <- inner_join(st_as_sf(com), dfm, by = c('com' = 'COMUNA'))
+  duplicated(rsl$COMUNA) %>% unique()
+  rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m09_brr_ida_taxi_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m09_brr_ida_taxi_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
+  
+  # Barrios --------------------------------------------------------------
+  # Univalle
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5, f_34:f_41)
+  lbl <- data.frame(nameCol = paste0('f_', c(34:36, 38:41)),
+                    barrera = c('abordar', 'a_priorit', 'ub_asiento', 'comu_dest', 'pagar', 'leer', 'bajar'))
+  nms <- as.character(lbl$barrera)
+  dfm <- dfm %>% 
+    setNames(c('id_encuesta', 'barrio', nms)) %>% 
+    dplyr::select(-id_encuesta) %>% 
+    gather(dificultad, tipo, -barrio) %>% 
+    drop_na() %>% 
+    inner_join(., ctg, by = 'tipo') %>% 
+    group_by(barrio, dificultad) %>% 
+    dplyr::summarize(promedio = mean(valor, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    spread(dificultad, promedio) %>% 
+    NAer() %>% 
+    retype()
+  
+  # LFM
+  lfm <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/09_barreras_ida_taxi.shp') %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B7) %>% 
+    setNames(c('BARRIO', 'abordar', 'a_priorit', 'ub_asiento', 'comu_dest', 'pagar', 'leer', 'bajar', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry) %>% 
+    mutate(barrio = as.character(BARRIO)) %>% 
+    dplyr::select(-BARRIO)
+  
+  # Join
+  rsl <- bind_rows(dfm, lfm)
+  duplicated(rsl$barrio) %>% unique()
+  rsl <- inner_join(st_as_sf(brr), rsl, by = c('BARRIO' = 'barrio'))
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrios', layer = paste0('m09_brr_ida_taxi_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
+  print('Done!')
+  
 }
 map09()
 
@@ -291,9 +387,9 @@ map10()
 # Mapa 11. Barreras ida Jeep ----------------------------------------------
 map11 <- function(){
   
-  dfm <- tbl
-  
+  # Comunas ---------------------------------------------------------------
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5, f_78:f_87)
   lbl <- data.frame(nameCol = paste0('f_', c(78:82, 84:87)),
@@ -326,16 +422,57 @@ map11 <- function(){
     dplyr::select(-suma) %>%
     group_by(ID_COMUNA) %>% 
     summarise_all(.funs = mean) %>% 
-    ungroup()
+    ungroup() %>% 
+    rename(COMUNA = ID_COMUNA)
   
   sort(colnames(dfm))
   sort(colnames(lfm))
   
   # Join
   rsl <- bind_rows(dfm, lfm)
-  rsl <- inner_join(st_as_sf(com), dfm, by = c('com' = 'COMUNA'))
+  duplicated(rsl$COMUNA) %>% unique()
+  rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m11_brr_ida_jeep_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m11_brr_ida_jeep_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
+  print('Done!')
+  
+  # Barrios ---------------------------------------------------------------
+  # Univalle
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5, f_78:f_87)
+  lbl <- data.frame(nameCol = paste0('f_', c(78:82, 84:87)),
+                    barrera = c('ubic', 'llgr_pard', 'a_prio', 'abrdr_vh', 'ubicar_asn', 'com_dst', 'pgr_trn', 'leer', 'bajar'))
+  nms <- as.character(lbl$barrera)
+  dfm <- dfm %>% 
+    setNames(c('id_encuesta', 'barrio', nms)) %>% 
+    dplyr::select(-id_encuesta) %>% 
+    gather(dificultad, tipo, -barrio) %>% 
+    drop_na() %>%
+    inner_join(., ctg, by = 'tipo') %>% 
+    group_by(barrio, dificultad) %>% 
+    dplyr::summarize(promedio = mean(valor, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    spread(dificultad, promedio) %>% 
+    NAer() %>% 
+    retype()
+  
+  # LFM
+  lfm <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/11_barreras_ida_jeepi.shp') %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B9) %>% 
+    setNames(c('BARRIO', 'ubic', 'llgr_pard', 'a_prio', 'abrdr_vh', 'ubicar_asn', 'com_dst', 'pgr_trn', 'leer', 'bajar', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry) %>% 
+    mutate(barrio = as.character(BARRIO)) %>% 
+    dplyr::select(-BARRIO)
+  
+  # Join
+  rsl <- bind_rows(dfm, lfm)
+  duplicated(rsl$barrio) %>% unique()
+  rsl <- inner_join(st_as_sf(brr), rsl, by = c('BARRIO' = 'barrio'))
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrios', layer = paste0('m11_brr_ida_jeep_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
 }
 map11()
@@ -393,16 +530,17 @@ map12 <- function(){
     summarize_all(.funs = mean)
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m12_brr_regreso_jeep_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m12_brr_regreso_jeep_', dte), driver = 'ESRI Shapefile')
   print('Done!') 
   
 }
 
 # Mapa 13. Barreras ida MIO articulado ------------------------------------
 map13 <- function(){
-  dfm <- tbl
   
+  # Comunas -----------------------------------------------------------------
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5, f_98:f_108)
   lbl <- data.frame(nameCol = paste0('f_', 98:108),
@@ -443,10 +581,49 @@ map13 <- function(){
   # Join
   rsl <- bind_rows(dfm, lfm) %>% 
     arrange(COMUNA)
-  rsl <- inner_join(st_as_sf(com), dfm, by = c('com' = 'COMUNA'))
+  duplicated(rsl$COMUNA) %>% unique()
+  rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m13_brr_ida_MIOart_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m13_brr_ida_MIOart_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
+  
+  # Barrios -----------------------------------------------------------------
+  # Univalle
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5, f_98:f_108)
+  lbl <- data.frame(nameCol = paste0('f_', 98:108),
+                    barrera = c('ubicar', 'llgr_pard', 'a_prio', 'abrdr_vh', 'ubicar_asn', 'uso_prio', 'dcd_rcrrd', 'com_dst', 'pagar', 'leer', 'bajar'))
+  nms <- as.character(lbl$barrera)
+  dfm <- dfm %>% 
+    setNames(c('id_encuesta', 'barrio', nms)) %>% 
+    dplyr::select(-id_encuesta) %>% 
+    gather(dificultad, tipo, -barrio) %>% 
+    drop_na() %>% 
+    inner_join(., ctg, by = 'tipo') %>% 
+    group_by(barrio, dificultad) %>% 
+    dplyr::summarize(promedio = mean(valor, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    spread(dificultad, promedio) %>% 
+    NAer() %>% 
+    retype()
+  
+  # LFM
+  lfm <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/13_barreras_ida_MIOarticulado.shp') %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B11) %>% 
+    setNames(c('BARRIO', 'ubicar', 'llgr_pard', 'a_prio', 'abrdr_vh', 'ubicar_asn', 'uso_prio', 'dcd_rcrrd', 'com_dst', 'pagar', 'leer', 'bajar', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry) %>% 
+    mutate(barrio = as.character(BARRIO)) %>% 
+    dplyr::select(-BARRIO)
+  
+  dfm <- bind_rows(dfm, lfm) %>% 
+    group_by(barrio) %>% 
+    summarize_all(.funs = sum)
+  rsl <- inner_join(st_as_sf(brr), dfm, by = c('BARRIO' = 'barrio'))
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrios', layer = paste0('m13_brr_ida_MIOart_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   
 }
 map13()
@@ -512,9 +689,10 @@ map14()
 
 # Mapa 15. Barreras ida MIO complementario --------------------------------
 map15 <- function(){
-  dfm <- tbl
   
+  # Comunas -----------------------------------------------------------------
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5, f_120:f_130)
   lbl <- data.frame(nameCol = paste0('f_', 120:130),
@@ -555,10 +733,50 @@ map15 <- function(){
   # Join
   rsl <- bind_rows(dfm, lfm) %>% 
     arrange(COMUNA)
-  rsl <- inner_join(st_as_sf(com), dfm, by = c('com' = 'COMUNA'))
+  duplicated(rsl$COMUNA) %>% unique()
+  rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m15_brr_ida_MIOcmp_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m15_brr_ida_MIOcmp_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
+  
+  # Barrios -----------------------------------------------------------------
+  # Univalle
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5, f_120:f_130)
+  lbl <- data.frame(nameCol = paste0('f_', 120:130),
+                    barrera = c('ubicar', 'llgr_pard', 'a_prio', 'abrdr_vh', 'ubicar_asn', 'uso_prio', 'dcd_rcrrd', 'com_dst', 'pagar', 'leer', 'bajar'))
+  nms <- as.character(lbl$barrera)
+  dfm <- dfm %>% 
+    setNames(c('id_encuesta', 'barrio', nms)) %>% 
+    dplyr::select(-id_encuesta) %>% 
+    gather(dificultad, tipo, -barrio) %>% 
+    drop_na() %>% 
+    inner_join(., ctg, by = 'tipo') %>% 
+    group_by(barrio, dificultad) %>% 
+    dplyr::summarize(promedio = mean(valor, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    spread(dificultad, promedio) %>% 
+    NAer() %>% 
+    retype()
+  
+  # LFM
+  lfm <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/15_barreras_ida_MIOcomplementario.shp') %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B11) %>% 
+    setNames(c('BARRIO', 'ubicar', 'llgr_pard', 'a_prio', 'abrdr_vh', 'ubicar_asn', 'uso_prio', 'dcd_rcrrd', 'com_dst', 'pagar', 'leer', 'bajar', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry) %>% 
+    mutate(barrio = as.character(BARRIO)) %>% 
+    dplyr::select(-BARRIO)
+  
+  dfm <- bind_rows(dfm, lfm) %>% 
+    group_by(barrio) %>% 
+    summarize_all(.funs = sum)
+  duplicated(dfm$barrio) %>% unique()
+  rsl <- inner_join(st_as_sf(brr), dfm, by = c('BARRIO' = 'barrio'))
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrios', layer = paste0('m15_brr_ida_MIOcmp_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)  
   
 }
 map15()
@@ -624,9 +842,10 @@ map16()
 
 # Mapa 17. Barreras ida peaton --------------------------------------------
 map17 <- function(){
-  dfm <- tbl
   
+  # Barrios ---------------------------------------------------------------
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5, f_1:f_10)
   lbl <- data.frame(nameCol = paste0('f_', c(1:7, 9:10)),
@@ -667,10 +886,55 @@ map17 <- function(){
   # Join
   rsl <- bind_rows(dfm, lfm) %>% 
     arrange(COMUNA)
-  rsl <- inner_join(st_as_sf(com), dfm, by = c('com' = 'COMUNA'))
+  duplicated(rsl$COMUNA) %>% unique()
+  rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m17_brr_ida_peaton_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m17_brr_ida_peaton_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
+  
+  # Barrios --------------------------------------------------------------
+  # Univalle
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5, f_1:f_10)
+  lbl <- data.frame(nameCol = paste0('f_', c(1:7, 9:10)),
+                    barrera = c('idnt_clles', 'sbr_bjr', 'dspl_and', 'dspl_obst', 'prb_pav', 'acera_rmps', 'crzr_clls', 'puentes', 'leer'))
+  nms <- as.character(lbl$barrera)
+  dfm <- dfm %>% 
+    setNames(c('id_encuesta', 'barrio', nms)) %>% 
+    dplyr::select(-id_encuesta) %>% 
+    gather(dificultad, tipo, -barrio) %>% 
+    drop_na() %>% 
+    inner_join(., ctg, by = 'tipo') %>% 
+    group_by(barrio, dificultad) %>% 
+    dplyr::summarize(promedio = mean(valor, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    spread(dificultad, promedio) %>% 
+    NAer() %>% 
+    retype()
+  
+  # LFM
+  lfm <- st_read('D:/univalle/movilidad/data/shp/own/movilidad/lfm/17_barreras_ida_peaton.shp') %>% 
+    dplyr::select(BARRIO, Ave_B1:Ave_B9) %>% 
+    setNames(c('BARRIO', 'idnt_clles', 'sbr_bjr', 'dspl_and', 'dspl_obst', 'prb_pav', 'acera_rmps', 'crzr_clls', 'puentes', 'leer', 'geometry')) %>% 
+    as.data.frame() %>% 
+    as_tibble() %>% 
+    dplyr::select(-geometry) %>% 
+    mutate(barrio = as.character(BARRIO)) %>% 
+    dplyr::select(-BARRIO)
+  
+  colnames(dfm) %>% sort()
+  colnames(lfm) %>% sort()
+  
+  dfm <- bind_rows(dfm, lfm) %>% 
+    group_by(barrio) %>% 
+    summarize_all(.funs = sum)
+  rsl <- inner_join(st_as_sf(brr), dfm, by = c('BARRIO' = 'barrio'))
+  nrow(dfm)
+  nrow(rsl)
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrio', layer = paste0('m17_brr_ida_peaton_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
+  
   
 }
 map17()

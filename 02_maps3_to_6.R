@@ -7,7 +7,7 @@ rm(list = ls())
 options(scipen = 999)
 
 # Functions to use --------------------------------------------------------
-pth <- '../tbl/0826_total_wide.xlsx'
+pth <- '../tbl/encuestas/0927_EMA_total.xlsx'
 tbl <- read_excel(pth)
 com <- shapefile('../shp/base/bcs_comunas_geo.shp')
 brr <- st_read('../shp/base/bcs_barrios_geo.shp') %>% 
@@ -31,18 +31,23 @@ trn <- mutate(trn, transp = as.character(transp),
 
 # Mapa 3. Origen total de los viajes de las PcD ---------------------------
 map03 <- function(dfm){
-  dfm <- tbl
   
-  # Univalle
+  # Comunas ---------------------------------------------------------------
+
+  # Univalle ---------------------------------------
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(id_encuesta, a_5) %>% 
-    inner_join(., as.data.frame(brr), by = c('a_5' = 'BARRIO')) %>% 
+    inner_join(., as.data.frame(brr), by = c('a_5' = 'BARRIO')) 
+  nrow(dfm) == nrow(tbl)
+  dfm <- dfm %>% 
     group_by(COMUNA) %>% 
     dplyr::summarise(viajes = n()) %>% 
     ungroup() %>% 
     mutate(COMUNA = as.numeric(COMUNA))
+  sum(dfm$viajes)
   
-  # LFM
+  # LFM ------------------------------------------
   lfm <- paste0(pth.lfm, '/03_origen_viajes.shp') %>% 
     st_read %>% 
     as.data.frame() %>% 
@@ -52,12 +57,38 @@ map03 <- function(dfm){
     ungroup() %>% 
     rename(COMUNA = ID_COMUNA)
   
-  # Join
+  # Join Comunas
   fnl <- rbind(dfm, lfm) %>% 
     arrange(COMUNA)
+  duplicated(fnl$COMUNA) %>% unique()
   fnl <- inner_join(st_as_sf(com), fnl, by = c('com' = 'COMUNA'))
   fnl <- as(fnl, 'Spatial')
-  writeOGR(obj = fnl, dsn = '../shp/maps', layer = paste0('m03_origenViajes_', dte), driver = 'ESRI Shapefile')
+  sum(fnl$viajes)
+  writeOGR(obj = fnl, dsn = '../shp/maps/comunas', layer = paste0('m03_origenViajes_', dte), driver = 'ESRI Shapefile')
+  print('Done!')
+  
+  # Barrios ---------------------------------------------------------------
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(id_encuesta, a_5) %>% 
+    inner_join(., as.data.frame(brr), by = c('a_5' = 'BARRIO')) %>% 
+    group_by(a_5) %>% 
+    dplyr::summarise(viajes = n()) %>% 
+    ungroup() 
+  
+  lfm <- paste0(pth.lfm, '/03_origen_viajes.shp') %>% 
+    st_read %>% 
+    as.data.frame() %>% 
+    dplyr::select(BARRIO, TOT_VIAJES) %>% 
+    group_by(BARRIO) %>% 
+    dplyr::summarise(viajes = sum(TOT_VIAJES, na.rm = TRUE)) %>% 
+    ungroup() %>% 
+    rename(a_5 = BARRIO)
+  
+  fnl <- rbind(dfm, lfm)
+  fnl <- inner_join(st_as_sf(brr), fnl, by = c('BARRIO' = 'a_5'))
+  fnl <- as(fnl, 'Spatial')
+  writeOGR(obj = fnl, dsn = '../shp/maps/barrios', layer = paste0('m03_origenViajes_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
   
 }
@@ -65,9 +96,10 @@ map03(dfm = tbl)
 
 # Mapa 4. Destino total de los viajes de las PcD --------------------------
 map04 <- function(shp){
-  shp <- dst
   
+  # Comunas ---------------------------------------------------------------
   # Univalle
+  shp <- dst
   dfm <- raster::intersect(as(shp, 'Spatial'), com) %>% 
     as.data.frame %>% 
     as_tibble %>% 
@@ -98,14 +130,20 @@ map04 <- function(shp){
   writeOGR(obj = fnl, dsn = '../shp/maps', layer = paste0('m04_destinoViajes_', dte), driver = 'ESRI Shapefile')
   print('Done!')
   
+  # Barrios --------------------------------------------------------------
+
+  
+  
 }
 map04(shp = dst)
 
 # Mapa 5. Origen de viajes por modo de transporte de las PcD --------------
 map05 <- function(dfm){
-  dfm <- tbl
+  
+  # Comunas ---------------------------------------------------------------
   
   # Univalle
+  dfm <- tbl
   dfm <- dfm %>% 
     dplyr::select(a_5, e_7_1:e_7_10) %>% 
     inner_join(., as.data.frame(brr) %>% dplyr::select(BARRIO, COMUNA), by = c('a_5' = 'BARRIO')) %>% 
@@ -120,7 +158,7 @@ map05 <- function(dfm){
     dplyr::select(COMUNA, label, count) %>% 
     spread(label, count) %>% 
     mutate(COMUNA = as.character(COMUNA))
-    
+  
   # LFM
   lfm <- paste0(pth.lfm, '/mapa5_6_origen_destino.shp') %>% 
     st_read %>% 
@@ -141,10 +179,48 @@ map05 <- function(dfm){
     retype()
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m05_origenMdT_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps/comunas', layer = paste0('m05_origenMdT_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
   print('Done!')
-  return(rsl)
+  
+  # Barrio ------------------------------------------------------------------
+  dfm <- tbl
+  dfm <- dfm %>% 
+    dplyr::select(a_5, e_7_1:e_7_10) %>% 
+    inner_join(., as.data.frame(brr) %>% dplyr::select(BARRIO, COMUNA), by = c('a_5' = 'BARRIO')) %>% 
+    dplyr::select(COMUNA, everything()) %>% 
+      gather(nameCol, transporte, -COMUNA, -a_5) %>% 
+    drop_na() %>% 
+    group_by(COMUNA, a_5, transporte) %>% 
+    dplyr::summarise(count = n()) %>% 
+    ungroup() %>% 
+    inner_join(., trn, by = c('transporte' = 'transp')) %>% 
+    dplyr::select(COMUNA, a_5, label, count) %>% 
+    spread(label, count) %>% 
+    dplyr::select(-COMUNA) %>% 
+    rename(BARRIO = a_5)
+  
+  # LFM
+  lfm <- paste0(pth.lfm, '/mapa5_6_origen_destino.shp') %>% 
+    st_read %>% 
+    as.data.frame() %>% 
+    dplyr::select(BARRIO, starts_with('ori', ignore.case = TRUE)) %>% 
+    as_tibble() %>% 
+    setNames(c('BARRIO', 'MIOp', 'buspubl', 'jeep', 'taxi', 'vpart', 'mpart', 'bici', 'camin_rod', 'otro')) %>% 
+    group_by(BARRIO) %>% 
+    summarize_all(.funs = sum) %>% 
+    ungroup()
+  
+  # Join
+  rsl <- bind_rows(dfm, lfm) %>% 
+    NAer() %>% 
+    retype()
+  rsl <- inner_join(st_as_sf(brr), rsl, by = c('BARRIO' = 'BARRIO'))
+  rsl <- as(rsl, 'Spatial')
+  writeOGR(obj = rsl, dsn = '../shp/maps/barrios', layer = paste0('m05_origenMdT_', dte), driver = 'ESRI Shapefile', overwrite_layer = TRUE)
+  print('Done!')
+  
 }
+map05()
 
 # Mapa 6. Destino de viajes por modo de transporte ------------------------
 map06 <- function(dfm, sft){
@@ -196,10 +272,10 @@ map06 <- function(dfm, sft){
     retype()
   rsl <- inner_join(st_as_sf(com), rsl, by = c('com' = 'COMUNA'))
   rsl <- as(rsl, 'Spatial')
-  writeOGR(obj = fnl, dsn = '../shp/maps', layer = paste0('m06_destinoMdT_', dte), driver = 'ESRI Shapefile')
+  writeOGR(obj = rsl, dsn = '../shp/maps', layer = paste0('m06_destinoMdT_', dte), driver = 'ESRI Shapefile')
   print('Done!')
   return(rsl)
 }
-
+map06()
 
 
